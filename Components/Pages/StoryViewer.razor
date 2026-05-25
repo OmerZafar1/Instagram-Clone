@@ -1,0 +1,338 @@
+@page "/stories/view/{Username}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@inject IFollowService FollowService
+@inject IStoryService StoryService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Stories - Instagram</PageTitle>
+
+<div class="ig-story-viewer-page">
+    @if (isLoading)
+    {
+        <p class="ig-empty-text text-center">Loading...</p>
+    }
+    else if (!string.IsNullOrEmpty(error))
+    {
+        <div class="ig-empty-state">
+            <p class="ig-empty-title">@error</p>
+            <a class="ig-btn ig-btn-secondary" href="/feed">Back to feed</a>
+        </div>
+    }
+    else if (currentStory is not null)
+    {
+        <article class="ig-story-viewer">
+            <div class="ig-story-progress">
+                @for (var i = 0; i < stories.Count; i++)
+                {
+                    <span class="@(i <= currentIndex ? "active" : "")"></span>
+                }
+            </div>
+
+            <header class="ig-story-viewer-header">
+                <a class="ig-story-viewer-user" href="@($"/profile/{currentStory.UserName}")">
+                    <img class="avatar-sm" src="@AvatarUrl(currentStory.AvatarPath)" alt="" />
+                    <strong>@currentStory.UserName</strong>
+                    <span>@TimeLeft(currentStory.ExpiresAt)</span>
+                </a>
+                <a class="ig-story-close" href="/feed" aria-label="Close story">x</a>
+            </header>
+
+            <div class="ig-story-media">
+                @if (currentStory.MediaType == "video")
+                {
+                    <video src="/@currentStory.MediaPath" controls autoplay playsinline></video>
+                }
+                else
+                {
+                    <img src="/@currentStory.MediaPath" alt="" />
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(currentStory.Caption))
+            {
+                <p class="ig-story-caption">@currentStory.Caption</p>
+            }
+
+            @if (currentStory.UserId == currentUserId)
+            {
+                <div class="ig-story-viewers">
+                    <p class="ig-story-views">@storyViewers.Count view@(storyViewers.Count == 1 ? "" : "s")</p>
+
+                    @if (storyViewers.Count > 0)
+                    {
+                        <div class="ig-story-viewer-list" aria-label="Story viewers">
+                            @foreach (var viewer in storyViewers)
+                            {
+                                <a class="ig-story-viewer-row" href="@($"/profile/{viewer.UserName}")">
+                                    <img class="avatar-sm" src="@AvatarUrl(viewer.AvatarPath)" alt="" />
+                                    <span>
+                                        <strong>@viewer.UserName</strong>
+                                        <small>@ViewedAtText(viewer.ViewedAt)</small>
+                                    </span>
+                                </a>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="ig-story-interactions">
+                    <div class="ig-story-reactions" aria-label="Story reactions">
+                        @foreach (var reaction in reactionOptions)
+                        {
+                            <button type="button"
+                                    class="ig-story-reaction"
+                                    @onclick="() => SendReaction(reaction.Value)"
+                                    disabled="@isSendingInteraction">
+                                @reaction.Label
+                            </button>
+                        }
+                    </div>
+
+                    <EditForm Model="replyInput" OnSubmit="SendReply" class="ig-story-reply-form">
+                        <InputText @bind-Value="replyInput.Text"
+                                   class="ig-story-reply-input"
+                                   placeholder="Reply..."
+                                   maxlength="500"
+                                   disabled="@isSendingInteraction" />
+                        <button type="submit"
+                                class="ig-story-reply-submit"
+                                disabled="@(isSendingInteraction || string.IsNullOrWhiteSpace(replyInput.Text))">
+                            Send
+                        </button>
+                    </EditForm>
+
+                    @if (!string.IsNullOrEmpty(interactionStatus))
+                    {
+                        <p class="ig-story-interaction-status">@interactionStatus</p>
+                    }
+                    @if (!string.IsNullOrEmpty(interactionError))
+                    {
+                        <p class="ig-story-interaction-error">@interactionError</p>
+                    }
+                </div>
+            }
+
+            <div class="ig-story-controls">
+                <button type="button" class="ig-btn ig-btn-secondary" @onclick="Previous" disabled="@(currentIndex == 0)">Previous</button>
+                <button type="button" class="ig-btn ig-btn-primary" @onclick="Next" disabled="@(currentIndex >= stories.Count - 1)">Next</button>
+            </div>
+        </article>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string Username { get; set; } = "";
+
+    private Data.ApplicationUser? owner;
+    private IReadOnlyList<StoryViewItem> stories = [];
+    private IReadOnlyList<StoryViewerItem> storyViewers = [];
+    private StoryViewItem? currentStory => currentIndex >= 0 && currentIndex < stories.Count ? stories[currentIndex] : null;
+    private string? currentUserId;
+    private string? error;
+    private string? interactionError;
+    private string? interactionStatus;
+    private bool isLoading = true;
+    private bool isSendingInteraction;
+    private int currentIndex;
+    private StoryReplyInput replyInput = new();
+    private readonly IReadOnlyList<StoryReactionOption> reactionOptions =
+    [
+        new("Love", "Love"),
+        new("Laugh", "Laugh"),
+        new("Fire", "Fire"),
+        new("Clap", "Clap"),
+        new("Wow", "Wow")
+    ];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        error = null;
+        currentIndex = 0;
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(currentUserId))
+        {
+            error = "Please log in to view stories.";
+            isLoading = false;
+            return;
+        }
+
+        owner = await FollowService.GetProfileByUserNameAsync(Username);
+        if (owner is null)
+        {
+            error = "Story not found.";
+            isLoading = false;
+            return;
+        }
+
+        stories = await StoryService.GetVisibleStoriesByUserAsync(owner.Id, currentUserId);
+        if (stories.Count == 0)
+        {
+            error = "No active story, or this story is private.";
+            isLoading = false;
+            return;
+        }
+
+        await MarkCurrentViewed();
+        isLoading = false;
+    }
+
+    private async Task Previous()
+    {
+        if (currentIndex == 0)
+        {
+            return;
+        }
+
+        currentIndex--;
+        ClearInteractionState();
+        await MarkCurrentViewed();
+    }
+
+    private async Task Next()
+    {
+        if (currentIndex >= stories.Count - 1)
+        {
+            return;
+        }
+
+        currentIndex++;
+        ClearInteractionState();
+        await MarkCurrentViewed();
+    }
+
+    private async Task SendReaction(string reaction)
+    {
+        if (currentStory is null || currentUserId is null || isSendingInteraction)
+        {
+            return;
+        }
+
+        await SendInteractionAsync(async () =>
+        {
+            var sent = await StoryService.ReactToStoryAsync(currentStory.Id, currentUserId, reaction);
+            interactionStatus = sent is null ? null : "Reaction sent.";
+            interactionError = sent is null ? "Could not send reaction." : null;
+        });
+    }
+
+    private async Task SendReply()
+    {
+        if (currentStory is null || currentUserId is null || string.IsNullOrWhiteSpace(replyInput.Text))
+        {
+            return;
+        }
+
+        var text = replyInput.Text;
+        await SendInteractionAsync(async () =>
+        {
+            var sent = await StoryService.ReplyToStoryAsync(currentStory.Id, currentUserId, text);
+            if (sent is null)
+            {
+                interactionStatus = null;
+                interactionError = "Could not send reply.";
+                return;
+            }
+
+            replyInput = new StoryReplyInput();
+            interactionStatus = "Reply sent.";
+            interactionError = null;
+        });
+    }
+
+    private async Task SendInteractionAsync(Func<Task> action)
+    {
+        isSendingInteraction = true;
+        interactionError = null;
+        interactionStatus = null;
+
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            interactionError = ex.Message;
+        }
+        finally
+        {
+            isSendingInteraction = false;
+        }
+    }
+
+    private async Task MarkCurrentViewed()
+    {
+        if (currentStory is not null && currentUserId is not null)
+        {
+            await StoryService.MarkViewedAsync(currentStory.Id, currentUserId);
+            await LoadCurrentViewers();
+        }
+    }
+
+    private async Task LoadCurrentViewers()
+    {
+        if (currentStory is null || currentUserId is null || currentStory.UserId != currentUserId)
+        {
+            storyViewers = [];
+            return;
+        }
+
+        storyViewers = await StoryService.GetStoryViewersAsync(currentStory.Id, currentUserId);
+    }
+
+    private void ClearInteractionState()
+    {
+        interactionError = null;
+        interactionStatus = null;
+        replyInput = new StoryReplyInput();
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+
+    private static string TimeLeft(DateTime expiresAt)
+    {
+        var remaining = expiresAt - DateTime.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+        {
+            return "expired";
+        }
+
+        if (remaining.TotalMinutes < 1)
+        {
+            return "less than 1m left";
+        }
+
+        return $"{Math.Ceiling(remaining.TotalMinutes)}m left";
+    }
+
+    private static string ViewedAtText(DateTime viewedAt)
+    {
+        var elapsed = DateTime.UtcNow - viewedAt;
+        if (elapsed.TotalMinutes < 1)
+        {
+            return "just now";
+        }
+
+        if (elapsed.TotalHours < 1)
+        {
+            return $"{Math.Floor(elapsed.TotalMinutes)}m ago";
+        }
+
+        return $"{Math.Floor(elapsed.TotalHours)}h ago";
+    }
+
+    private sealed record StoryReactionOption(string Value, string Label);
+
+    private sealed class StoryReplyInput
+    {
+        public string Text { get; set; } = "";
+    }
+}

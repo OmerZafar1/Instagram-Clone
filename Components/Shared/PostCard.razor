@@ -1,0 +1,345 @@
+@using MiniInstagram.Models
+@inject IPostService PostService
+
+<article class="ig-post">
+    <header class="ig-post-header">
+        <a class="ig-post-user" href="@ProfileLink(Post.User.UserName)">
+            <img class="avatar-sm" src="@AvatarUrl(Post.User.AvatarPath)" alt="" />
+            <span class="ig-post-username">@Post.User.UserName</span>
+        </a>
+        <button type="button" class="ig-icon-btn" aria-label="More options">...</button>
+    </header>
+
+    <a href="@ProfileLink(Post.User.UserName)" class="ig-post-image-link">
+        @if (Post.MediaType == "video")
+        {
+            <video class="ig-post-image ig-post-video" src="/@Post.ImagePath" controls preload="metadata" playsinline></video>
+        }
+        else
+        {
+            <img class="ig-post-image" src="/@Post.ImagePath" alt="" />
+        }
+    </a>
+
+    <div class="ig-post-actions">
+        <button type="button" class="ig-icon-btn @(IsLiked ? "liked" : "")"
+                @onclick="ToggleLike" disabled="@isBusy" aria-label="Like">
+            @if (IsLiked)
+            {
+                <svg viewBox="0 0 24 24" fill="#ed4956"><path d="M16.792 3.904a4.989 4.989 0 0 1 3.504 1.353 4.987 4.987 0 0 1 0 7.071L12 20.405l-8.296-8.082a4.987 4.987 0 0 1 0-7.071 4.989 4.989 0 0 1 7.071 0L12 6.343l.825-.824a4.989 4.989 0 0 1 3.504-1.353Z"/></svg>
+            }
+            else
+            {
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            }
+        </button>
+        <button type="button" class="ig-icon-btn" aria-label="Comment" @onclick="FocusComment">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        </button>
+        <button type="button" class="ig-icon-btn ig-save-btn @(IsSaved ? "saved" : "")"
+                @onclick="ToggleSave" disabled="@isBusy" aria-label="Save post">
+            @if (IsSaved)
+            {
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>
+            }
+            else
+            {
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>
+            }
+        </button>
+    </div>
+
+    <div class="ig-post-body">
+        <p class="ig-post-likes"><strong>@Post.Likes.Count</strong> @(Post.Likes.Count == 1 ? "like" : "likes")</p>
+
+        @if (!string.IsNullOrEmpty(operationError))
+        {
+            <p class="ig-post-error">@operationError</p>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Post.Caption))
+        {
+            <p class="ig-post-caption">
+                <a class="ig-post-caption-user" href="@ProfileLink(Post.User.UserName)">@Post.User.UserName</a>
+                @Post.Caption
+            </p>
+        }
+
+        @if (Post.Comments.Count > 0)
+        {
+            <button type="button" class="ig-view-comments" @onclick="ToggleComments">
+                @(showComments ? "Hide comments" : $"View comments ({Post.Comments.Count})")
+            </button>
+        }
+
+        @if (showComments)
+        {
+            var orderedComments = Post.Comments.OrderBy(c => c.CreatedAt).ToList();
+            var shouldCollapseComments = !showAllComments && orderedComments.Count >= CommentCollapseThreshold;
+            var visibleComments = shouldCollapseComments
+                ? orderedComments.TakeLast(InitialVisibleCommentCount).ToList()
+                : orderedComments;
+            var hiddenCommentCount = shouldCollapseComments
+                ? orderedComments.Count - visibleComments.Count
+                : 0;
+
+            <ul class="ig-comments">
+                @foreach (var comment in visibleComments)
+                {
+                    <li class="ig-comment-item">
+                        @if (editingCommentId == comment.Id)
+                        {
+                            <div class="ig-comment-edit">
+                                <a class="ig-comment-user" href="@ProfileLink(comment.User.UserName)">@comment.User.UserName</a>
+                                <input class="ig-comment-edit-input" @bind="commentEditInput.Content" maxlength="1000" />
+                                <div class="ig-comment-actions">
+                                    <button type="button" @onclick="SaveCommentEdit" disabled="@isBusy">Save</button>
+                                    <button type="button" @onclick="CancelCommentEdit" disabled="@isBusy">Cancel</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="ig-comment-line">
+                                <span>
+                                    <a class="ig-comment-user" href="@ProfileLink(comment.User.UserName)">@comment.User.UserName</a>
+                                    <span class="ig-comment-text">@comment.Content</span>
+                                    @if (comment.UpdatedAt is not null)
+                                    {
+                                        <span class="ig-comment-edited">Edited</span>
+                                    }
+                                </span>
+
+                                @if (CanEditComment(comment) || CanDeleteComment(comment))
+                                {
+                                    <span class="ig-comment-actions">
+                                        @if (CanEditComment(comment))
+                                        {
+                                            <button type="button" @onclick="() => BeginEditComment(comment)" disabled="@isBusy">Edit</button>
+                                        }
+                                        @if (CanDeleteComment(comment))
+                                        {
+                                            <button type="button" @onclick="() => DeleteComment(comment.Id)" disabled="@isBusy">Delete</button>
+                                        }
+                                    </span>
+                                }
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+
+            @if (hiddenCommentCount > 0)
+            {
+                <button type="button" class="ig-more-comments" @onclick="ShowAllComments">
+                    View @hiddenCommentCount more @(hiddenCommentCount == 1 ? "comment" : "comments")
+                </button>
+            }
+            else if (showAllComments && orderedComments.Count >= CommentCollapseThreshold)
+            {
+                <button type="button" class="ig-more-comments" @onclick="ShowLessComments">
+                    Show fewer comments
+                </button>
+            }
+        }
+
+        <time class="ig-post-time">@Post.CreatedAt.ToLocalTime().ToString("MMMM d")</time>
+
+        @if (currentUserId is not null)
+        {
+            <EditForm Model="commentInput" OnValidSubmit="SubmitComment" class="ig-comment-form">
+                <InputText @bind-Value="commentInput.Content" class="ig-comment-input" placeholder="Add a comment..." />
+                @if (!string.IsNullOrWhiteSpace(commentInput.Content))
+                {
+                    <button type="submit" class="ig-comment-post" disabled="@isBusy">Post</button>
+                }
+            </EditForm>
+        }
+    </div>
+</article>
+
+@code {
+    [Parameter, EditorRequired]
+    public Post Post { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    [CascadingParameter]
+    public string? CurrentUserId { get; set; }
+
+    private string? currentUserId;
+    private bool isBusy;
+    private bool showComments;
+    private bool showAllComments;
+    private int? editingCommentId;
+    private string? operationError;
+    private CommentInput commentInput = new();
+    private CommentInput commentEditInput = new();
+
+    private const int CommentCollapseThreshold = 10;
+    private const int InitialVisibleCommentCount = 3;
+    private static readonly TimeSpan CommentEditWindow = TimeSpan.FromMinutes(30);
+
+    private bool IsLiked => currentUserId is not null && Post.Likes.Any(l => l.UserId == currentUserId);
+    private bool IsSaved => currentUserId is not null && Post.SavedByUsers.Any(s => s.UserId == currentUserId);
+
+    protected override void OnParametersSet()
+    {
+        currentUserId = CurrentUserId;
+    }
+
+    private void ToggleComments()
+    {
+        showComments = !showComments;
+        if (!showComments)
+        {
+            showAllComments = false;
+            CancelCommentEdit();
+        }
+    }
+
+    private void FocusComment() => showComments = true;
+
+    private void ShowAllComments() => showAllComments = true;
+
+    private void ShowLessComments() => showAllComments = false;
+
+    private bool CanEditComment(Comment comment) =>
+        currentUserId == comment.UserId && DateTime.UtcNow - comment.CreatedAt <= CommentEditWindow;
+
+    private bool CanDeleteComment(Comment comment) =>
+        currentUserId is not null && (currentUserId == comment.UserId || currentUserId == Post.UserId);
+
+    private void BeginEditComment(Comment comment)
+    {
+        editingCommentId = comment.Id;
+        commentEditInput = new CommentInput { Content = comment.Content };
+        operationError = null;
+    }
+
+    private void CancelCommentEdit()
+    {
+        editingCommentId = null;
+        commentEditInput = new();
+    }
+
+    private async Task ToggleLike()
+    {
+        if (currentUserId is null || isBusy) return;
+        isBusy = true;
+        operationError = null;
+        try
+        {
+            await PostService.ToggleLikeAsync(Post.Id, currentUserId);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is RateLimitExceededException or InvalidOperationException)
+        {
+            operationError = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task ToggleSave()
+    {
+        if (currentUserId is null || isBusy) return;
+        isBusy = true;
+        operationError = null;
+        try
+        {
+            await PostService.ToggleSaveAsync(Post.Id, currentUserId);
+            await OnChanged.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            operationError = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task SubmitComment()
+    {
+        if (currentUserId is null || isBusy || string.IsNullOrWhiteSpace(commentInput.Content)) return;
+        isBusy = true;
+        operationError = null;
+        try
+        {
+            await PostService.AddCommentAsync(Post.Id, currentUserId, commentInput.Content);
+            commentInput = new();
+            showComments = true;
+            showAllComments = true;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is RateLimitExceededException or InvalidOperationException)
+        {
+            operationError = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task SaveCommentEdit()
+    {
+        if (currentUserId is null || editingCommentId is null || isBusy || string.IsNullOrWhiteSpace(commentEditInput.Content)) return;
+        isBusy = true;
+        operationError = null;
+        try
+        {
+            await PostService.UpdateCommentAsync(editingCommentId.Value, currentUserId, commentEditInput.Content);
+            CancelCommentEdit();
+            await OnChanged.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            operationError = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task DeleteComment(int commentId)
+    {
+        if (currentUserId is null || isBusy) return;
+        isBusy = true;
+        operationError = null;
+        try
+        {
+            await PostService.DeleteCommentAsync(commentId, currentUserId);
+            if (editingCommentId == commentId)
+            {
+                CancelCommentEdit();
+            }
+            await OnChanged.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            operationError = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+
+    private static string ProfileLink(string? userName) =>
+        string.IsNullOrEmpty(userName) ? "#" : $"/profile/{userName}";
+
+    private sealed class CommentInput
+    {
+        public string Content { get; set; } = string.Empty;
+    }
+}

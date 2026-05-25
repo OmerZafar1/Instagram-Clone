@@ -1,0 +1,46 @@
+﻿@page "/"
+@layout Layout.AuthLayout
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Instagram</PageTitle>
+
+@if (isAuthenticated)
+{
+    <div class="auth-form-page">
+        <p class="auth-tagline">Redirecting…</p>
+    </div>
+}
+else
+{
+    <div class="auth-split">
+        <div class="auth-split-visual" aria-hidden="true">
+            <div class="auth-phone-mock"></div>
+        </div>
+        <div class="auth-split-form">
+            <div class="auth-card">
+                <h1 class="auth-brand">Instagram</h1>
+                <p class="auth-tagline">Share photos and videos with friends.</p>
+                <a class="ig-btn ig-btn-primary ig-btn-block" href="Account/Login">Log in</a>
+                <a class="ig-btn ig-btn-outline ig-btn-block mt-2" href="Account/Register">Sign up</a>
+            </div>
+            <p class="auth-footer-note text-center mt-4">
+                Log in to see photos and videos from people you follow.
+            </p>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isAuthenticated;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        isAuthenticated = auth.User.Identity?.IsAuthenticated == true;
+        if (isAuthenticated)
+        {
+            Navigation.NavigateTo("/feed", replace: true);
+        }
+    }
+}

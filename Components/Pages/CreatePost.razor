@@ -1,0 +1,99 @@
+@page "/create"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@inject IFollowService FollowService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Create - Instagram</PageTitle>
+
+<div class="ig-page create-post-page">
+    <h1 class="ig-page-title">Create new post</h1>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="ig-alert">@Error</div>
+    }
+
+    <form method="post" action="/posts/create" enctype="multipart/form-data" class="ig-create-card">
+        <AntiforgeryToken />
+
+        <div class="mb-3">
+            <label class="form-label" for="media">Select photo or video</label>
+            <input type="file" id="media" name="media" accept="image/*,video/*" class="form-control" required />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="caption">Write a caption...</label>
+            <textarea id="caption" name="caption" class="form-control" rows="4" maxlength="2200" placeholder="Write a caption..."></textarea>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="visibility">Who can see this post?</label>
+            <select id="visibility" name="visibility" class="form-control">
+                <option value="Public">Public - everyone</option>
+                <option value="FollowersOnly">Followers only</option>
+                <option value="SelectedFollowers">Selected followers</option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Choose selected followers</label>
+            @if (followers.Count == 0)
+            {
+                <p class="ig-form-help">You do not have followers to select yet.</p>
+            }
+            else
+            {
+                <div class="ig-select-followers">
+                    @foreach (var follower in followers)
+                    {
+                        <label class="ig-select-follower">
+                            <input type="checkbox" name="selectedViewerIds" value="@follower.UserId" />
+                            <img class="avatar-sm" src="@AvatarUrl(follower.AvatarPath)" alt="" />
+                            <span>
+                                <strong>@follower.UserName</strong>
+                                <small>@follower.DisplayName</small>
+                            </span>
+                        </label>
+                    }
+                </div>
+                <p class="ig-form-help mt-2">This list is used only when visibility is Selected followers.</p>
+            }
+        </div>
+
+        <button type="submit" class="ig-btn ig-btn-primary ig-btn-block">Share</button>
+    </form>
+</div>
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? Error { get; set; }
+
+    private IReadOnlyList<Models.UserListItemDto> followers = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId is not null)
+        {
+            followers = await FollowService.GetFollowersAsync(userId);
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        Error = Error switch
+        {
+            "noimage" => "Please select a photo or video to share.",
+            "type" => "Posts support JPG, PNG, WEBP, GIF, MP4, WEBM, or MOV files.",
+            "ratelimit" => "You are creating posts too quickly. Please wait a few minutes and try again.",
+            "spam" => "Spam detected. Please wait before posting again.",
+            _ => Error
+        };
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+}

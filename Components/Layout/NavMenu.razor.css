@@ -1,0 +1,110 @@
+.ig-nav {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 12px 12px 24px;
+    gap: 4px;
+}
+
+.ig-logo {
+    font-family: var(--ig-font-brand);
+    font-size: 1.75rem;
+    color: var(--ig-text);
+    text-decoration: none;
+    padding: 12px 12px 24px;
+    line-height: 1;
+}
+
+.ig-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px;
+    border-radius: 8px;
+    color: var(--ig-text);
+    text-decoration: none;
+    font-size: 16px;
+    border: none;
+    background: transparent;
+    width: 100%;
+    cursor: pointer;
+}
+
+.ig-nav-link:hover {
+    background: var(--ig-hover);
+    color: var(--ig-text);
+}
+
+.ig-nav-link.active {
+    font-weight: 700;
+}
+
+.ig-nav-link-primary {
+    color: var(--ig-primary);
+    font-weight: 600;
+}
+
+.ig-nav-icon {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ig-nav-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+.ig-nav-spacer {
+    flex: 1;
+}
+
+.ig-logout-form {
+    margin: 0;
+}
+
+.ig-nav-button {
+    text-align: left;
+}
+
+@media (max-width: 1263px) {
+    .ig-nav-label {
+        display: none;
+    }
+
+    .ig-logo {
+        font-size: 0;
+        width: 24px;
+        height: 24px;
+        padding: 12px;
+        background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23262626'%3E%3Cpath d='M12 2.163c3.204 0 3.584.012 4.85.07 1.17.054 1.97.24 2.427.403a4.92 4.92 0 0 1 1.77 1.153 4.92 4.92 0 0 1 1.153 1.77c.163.457.349 1.257.403 2.427.058 1.266.07 1.646.07 4.85s-.012 3.584-.07 4.85c-.054 1.17-.24 1.97-.403 2.427a4.92 4.92 0 0 1-1.153 1.77 4.92 4.92 0 0 1-1.77 1.153c-.457.163-1.257.349-2.427.403-1.266.058-1.646.07-4.85.07s-3.584-.012-4.85-.07c-1.17-.054-1.97-.24-2.427-.403a4.92 4.92 0 0 1-1.77-1.153 4.92 4.92 0 0 1-1.153-1.77c-.163-.457-.349-1.257-.403-2.427C2.175 15.747 2.163 15.367 2.163 12s.012-3.584.07-4.85c.054-1.17.24-1.97.403-2.427a4.92 4.92 0 0 1 1.153-1.77 4.92 4.92 0 0 1 1.77-1.153c.457-.163 1.257-.349 2.427-.403C8.416 2.175 8.796 2.163 12 2.163M12 0C8.741 0 8.333.014 7.053.072 5.775.132 4.905.333 4.14.63a6.865 6.865 0 0 0-2.471 1.612A6.865 6.865 0 0 0 .057 4.713C-.24 5.478-.441 6.348-.501 7.626-.559 8.906-.573 9.314-.573 12s.014 3.094.072 4.374c.06 1.278.261 2.148.558 2.913a6.865 6.865 0 0 0 1.612 2.471 6.865 6.865 0 0 0 2.471 1.612c.765.297 1.635.498 2.913.558 1.28.058 1.688.072 4.947.072s3.667-.014 4.947-.072c1.278-.06 2.148-.261 2.913-.558a6.865 6.865 0 0 0 2.471-1.612 6.865 6.865 0 0 0 1.612-2.471c.297-.765.498-1.635.558-2.913.058-1.28.072-1.688.072-4.947s-.014-3.667-.072-4.947c-.06-1.278-.261-2.148-.558-2.913a6.865 6.865 0 0 0-1.612-2.471A6.865 6.865 0 0 0 19.287.057C18.522-.24 17.652-.441 16.374-.501 15.094-.559 14.686-.573 12-.573z'/%3E%3Cpath d='M12 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z'/%3E%3C/svg%3E") center/contain no-repeat;
+    }
+}
+
+@media (max-width: 767px) {
+    .ig-nav {
+        flex-direction: row;
+        justify-content: space-around;
+        align-items: center;
+        padding: 0;
+        height: 56px;
+        gap: 0;
+    }
+
+    .ig-logo,
+    .ig-nav-spacer,
+    .ig-nav-label,
+    .ig-logout-form {
+        display: none;
+    }
+
+    .ig-nav-link {
+        flex-direction: column;
+        gap: 0;
+        padding: 8px 12px;
+        justify-content: center;
+    }
+}

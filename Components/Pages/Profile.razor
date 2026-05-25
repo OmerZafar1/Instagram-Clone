@@ -1,0 +1,209 @@
+@page "/profile/{Username}"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@inject IFollowService FollowService
+@inject IPostService PostService
+@inject IStoryService StoryService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>@pageTitle</PageTitle>
+
+@if (profile is null && !isLoading)
+{
+    <div class="ig-page"><p class="ig-empty-text">User not found.</p></div>
+}
+else if (profile is not null)
+{
+    <div class="ig-page profile-page">
+        @if (!string.IsNullOrEmpty(actionError))
+        {
+            <div class="ig-alert">@actionError</div>
+        }
+
+        <header class="ig-profile-header">
+            @if (hasVisibleStory)
+            {
+                <a class="ig-profile-story-link" href="@($"/stories/view/{profile.UserName}")" aria-label="View story">
+                    <img class="avatar-lg ig-profile-story-avatar" src="@AvatarUrl(profile.AvatarPath)" alt="" />
+                </a>
+            }
+            else
+            {
+                <img class="avatar-lg" src="@AvatarUrl(profile.AvatarPath)" alt="" />
+            }
+            <div class="ig-profile-info">
+                <div class="ig-profile-top">
+                    <h1 class="ig-profile-username">@profile.UserName</h1>
+                    @if (isOwnProfile)
+                    {
+                        <a class="ig-btn ig-btn-secondary" href="/profile/edit">Edit profile</a>
+                    }
+                    else if (currentUserId is not null)
+                    {
+                        <a class="ig-btn ig-btn-secondary" href="/messages/@profile.UserName">Message</a>
+                        <button type="button" class="ig-btn @(isFollowing || hasPendingFollowRequest ? "ig-btn-secondary" : "ig-btn-primary")"
+                                @onclick="ToggleFollow" disabled="@isBusy">
+                            @FollowButtonText
+                        </button>
+                        <a class="ig-btn ig-btn-secondary ig-btn-icon" href="/call/@profile.UserName?voice=true" title="Voice call">📞</a>
+                        <a class="ig-btn ig-btn-secondary ig-btn-icon" href="/call/@profile.UserName" title="Video call">📹</a>
+                    }
+                </div>
+                <ul class="ig-profile-stats">
+                    <li><strong>@postCount</strong> posts</li>
+                    <li><strong>@followerCount</strong> followers</li>
+                    <li><strong>@followingCount</strong> following</li>
+                </ul>
+                <p class="ig-profile-name">@profile.DisplayName</p>
+                @if (!string.IsNullOrWhiteSpace(profile.Bio))
+                {
+                    <p class="ig-profile-bio">@profile.Bio</p>
+                }
+                @if (profile.IsPrivate)
+                {
+                    <p class="ig-presence-label">Private account</p>
+                }
+            </div>
+        </header>
+
+        <div class="ig-profile-tabs">
+            <span class="ig-profile-tab active">POSTS</span>
+        </div>
+
+        @if (!canViewPosts)
+        {
+            <div class="ig-empty-state ig-empty-state-compact">
+                <p class="ig-empty-title">This account is private</p>
+                <p class="ig-empty-text">Follow this account to see their photos and videos.</p>
+            </div>
+        }
+        else if (posts is null)
+        {
+            <p class="ig-empty-text text-center">Loading…</p>
+        }
+        else if (posts.Count == 0)
+        {
+            <div class="ig-empty-state ig-empty-state-compact">
+                <p class="ig-empty-title">No posts yet</p>
+            </div>
+        }
+        else
+        {
+            <div class="ig-profile-grid">
+                @foreach (var post in posts)
+                {
+                    <a class="ig-grid-item" href="@($"/post/{post.Id}")">
+                        @if (post.MediaType == "video")
+                        {
+                            <video src="/@post.ImagePath" muted preload="metadata" playsinline></video>
+                            <span class="ig-media-badge">Video</span>
+                        }
+                        else
+                        {
+                            <img src="/@post.ImagePath" alt="" loading="lazy" />
+                        }
+                    </a>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string Username { get; set; } = "";
+
+    private Data.ApplicationUser? profile;
+    private IReadOnlyList<Models.Post>? posts;
+    private string? currentUserId;
+    private bool isFollowing;
+    private bool hasPendingFollowRequest;
+    private bool isOwnProfile;
+    private bool canViewPosts;
+    private bool isLoading = true;
+    private bool isBusy;
+    private int followerCount;
+    private int followingCount;
+    private int postCount;
+    private string pageTitle = "Profile";
+    private bool hasVisibleStory;
+    private string? actionError;
+
+    private string FollowButtonText =>
+        isFollowing ? "Following" :
+        hasPendingFollowRequest ? "Requested" :
+        profile?.IsPrivate == true ? "Request" :
+        "Follow";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        profile = await FollowService.GetProfileByUserNameAsync(Username);
+        if (profile is null)
+        {
+            isLoading = false;
+            return;
+        }
+
+        pageTitle = $"{profile.UserName} · Instagram";
+        isOwnProfile = currentUserId == profile.Id;
+        followerCount = await FollowService.GetFollowerCountAsync(profile.Id);
+        followingCount = await FollowService.GetFollowingCountAsync(profile.Id);
+        hasVisibleStory = currentUserId is not null
+            && await StoryService.HasVisibleActiveStoryAsync(profile.Id, currentUserId);
+
+        if (currentUserId is not null && !isOwnProfile)
+        {
+            isFollowing = await FollowService.IsFollowingAsync(currentUserId, profile.Id);
+            hasPendingFollowRequest = await FollowService.HasPendingFollowRequestAsync(currentUserId, profile.Id);
+        }
+
+        canViewPosts = isOwnProfile || !profile.IsPrivate || isFollowing;
+
+        await LoadPosts();
+        isLoading = false;
+    }
+
+    private async Task LoadPosts()
+    {
+        if (profile is null) return;
+        postCount = await PostService.GetUserPostCountAsync(profile.Id);
+        posts = canViewPosts
+            ? await PostService.GetUserPostsForViewerAsync(profile.Id, currentUserId)
+            : [];
+    }
+
+    private async Task ToggleFollow()
+    {
+        if (profile is null || currentUserId is null || isBusy) return;
+        isBusy = true;
+        actionError = null;
+        try
+        {
+            var result = await FollowService.ToggleFollowAsync(currentUserId, profile.Id);
+            isFollowing = result == Models.FollowActionResult.Followed ? true :
+                result == Models.FollowActionResult.Unfollowed ? false :
+                isFollowing;
+            hasPendingFollowRequest = result == Models.FollowActionResult.Requested ? true :
+                result == Models.FollowActionResult.CanceledRequest ? false :
+                hasPendingFollowRequest;
+            canViewPosts = isOwnProfile || !profile.IsPrivate || isFollowing;
+            followerCount = await FollowService.GetFollowerCountAsync(profile.Id);
+            await LoadPosts();
+        }
+        catch (RateLimitExceededException ex)
+        {
+            actionError = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+}

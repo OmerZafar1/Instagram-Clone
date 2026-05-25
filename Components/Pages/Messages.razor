@@ -1,0 +1,117 @@
+@page "/messages"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@inject IChatService ChatService
+@inject IPresenceService PresenceService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Messages · Instagram</PageTitle>
+
+<div class="ig-page messages-page">
+    <h1 class="ig-page-title">Messages</h1>
+
+    @if (conversations is null)
+    {
+        <p class="ig-empty-text text-center">Loading…</p>
+    }
+    else if (conversations.Count == 0)
+    {
+        <div class="ig-empty-state">
+            <p class="ig-empty-title">Your messages</p>
+            <p class="ig-empty-text">Send private photos and messages to a friend.</p>
+            <a class="ig-btn ig-btn-primary" href="/explore">Send message</a>
+        </div>
+    }
+    else
+    {
+        <ul class="ig-convo-list">
+            @foreach (var item in conversations)
+            {
+                var label = presenceLabels.GetValueOrDefault(item.OtherUserId, "");
+                var isOnline = label == "Active now";
+                <li class="ig-convo-item">
+                    <a href="/messages/@item.OtherUserName">
+                        <div class="ig-avatar-wrap">
+                            <img class="avatar-sm" src="@AvatarUrl(item.OtherAvatarPath)" alt="" />
+                            @if (isOnline)
+                            {
+                                <span class="ig-online-dot" title="Active now"></span>
+                            }
+                        </div>
+                        <div class="ig-convo-preview">
+                            <div class="d-flex justify-content-between align-items-baseline">
+                                <strong>@item.OtherUserName</strong>
+                                @if (item.LastMessageAt is not null)
+                                {
+                                    <small class="ig-convo-time">@FormatTime(item.LastMessageAt.Value)</small>
+                                }
+                            </div>
+                            <div class="ig-convo-sub">
+                                @if (!string.IsNullOrEmpty(label) && !isOnline)
+                                {
+                                    <span class="ig-presence-label">@label</span>
+                                }
+                                else
+                                {
+                                    <span class="text-truncate">@(item.LastMessagePreview ?? "No messages yet")</span>
+                                }
+                            </div>
+                        </div>
+                        @if (item.UnreadCount > 0)
+                        {
+                            <span class="ig-badge">@item.UnreadCount</span>
+                        }
+                    </a>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<ConversationListItemDto>? conversations;
+    private Dictionary<string, string> presenceLabels = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId is null) return;
+
+        // Render conversations immediately without waiting for Redis
+        conversations = await ChatService.GetConversationsAsync(userId);
+
+        // Load presence after list is visible — fire and forget
+        if (conversations.Count > 0)
+            _ = LoadPresenceAsync();
+    }
+
+    private async Task LoadPresenceAsync()
+    {
+        try
+        {
+            var tasks = conversations!.Select(async c =>
+                (c.OtherUserId, Label: await PresenceService.GetPresenceLabelAsync(c.OtherUserId)));
+
+            var results = await Task.WhenAll(tasks);
+            presenceLabels = results.ToDictionary(r => r.OtherUserId, r => r.Label);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* never block the list for presence */ }
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+
+    private static string FormatTime(DateTime utc)
+    {
+        var local = utc.ToLocalTime();
+        var diff = DateTime.Now - local;
+        if (diff.TotalMinutes < 1) return "now";
+        if (diff.TotalHours < 1) return $"{(int)diff.TotalMinutes}m";
+        if (diff.TotalDays < 1) return local.ToString("h:mm tt");
+        if (diff.TotalDays < 7) return local.ToString("ddd");
+        return local.ToString("MMM d");
+    }
+}

@@ -1,0 +1,46 @@
+@page "/stories/create"
+@attribute [Authorize]
+
+<PageTitle>Create Story - Instagram</PageTitle>
+
+<div class="ig-page create-post-page">
+    <h1 class="ig-page-title">Create story</h1>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="ig-alert">@Error</div>
+    }
+
+    <form method="post" action="/stories/upload" enctype="multipart/form-data" class="ig-create-card">
+        <AntiforgeryToken />
+
+        <div class="mb-3">
+            <label class="form-label" for="media">Photo or video</label>
+            <input type="file" id="media" name="media" accept="image/*,video/*" class="form-control" required />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="caption">Caption</label>
+            <textarea id="caption" name="caption" class="form-control" rows="3" maxlength="500" placeholder="Add a caption"></textarea>
+        </div>
+
+        <p class="ig-form-help">Visible to your followers for 1 hour.</p>
+        <button type="submit" class="ig-btn ig-btn-primary ig-btn-block">Share story</button>
+    </form>
+</div>
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? Error { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        Error = Error switch
+        {
+            "nomedia" => "Please select a photo or video for your story.",
+            "type" => "Stories support JPG, PNG, WEBP, GIF, MP4, WEBM, or MOV files.",
+            "ratelimit" => "You are creating stories too quickly. Please wait before posting another story.",
+            _ => Error
+        };
+    }
+}

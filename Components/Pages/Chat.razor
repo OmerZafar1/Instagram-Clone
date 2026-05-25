@@ -1,0 +1,332 @@
+@page "/messages/{Username}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@implements IAsyncDisposable
+@using System.Security.Claims
+@using Microsoft.AspNetCore.SignalR.Client
+@inject IChatService ChatService
+@inject IFollowService FollowService
+@inject IPresenceService PresenceService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ChatHubConnectionFactory HubFactory
+@inject IJSRuntime JS
+
+<PageTitle>Chat with @displayTitle</PageTitle>
+
+<div class="chat-page mx-auto d-flex flex-column">
+    @if (loadError is not null)
+    {
+        <div class="alert alert-warning">@loadError</div>
+    }
+    else if (conversationId is null || currentUserId is null)
+    {
+        <p class="text-muted">Loading chat...</p>
+    }
+    else
+    {
+        <div class="ig-chat-header">
+            <a href="/messages" class="ig-icon-btn" aria-label="Back">←</a>
+            <a class="ig-chat-header-user" href="/profile/@Username">
+                <div class="ig-avatar-wrap">
+                    <img class="avatar-sm" src="@AvatarUrl(otherAvatar)" alt="" />
+                    @if (presenceLabel == "Active now")
+                    {
+                        <span class="ig-online-dot"></span>
+                    }
+                </div>
+                <div>
+                    <strong>@Username</strong>
+                    @if (!string.IsNullOrEmpty(presenceLabel))
+                    {
+                        <div class="ig-presence-label">@presenceLabel</div>
+                    }
+                </div>
+            </a>
+            <a class="ig-btn ig-btn-secondary ig-btn-icon" href="/call/@Username?voice=true" title="Voice call">📞</a>
+            <a class="ig-btn ig-btn-secondary ig-btn-icon" href="/call/@Username" title="Video call">📹</a>
+        </div>
+
+        <div class="chat-messages flex-grow-1 p-3 mb-2" style="border:1px solid var(--ig-border);background:var(--ig-surface);">
+            @foreach (var msg in messages)
+            {
+                <div class="chat-bubble @(msg.IsMine ? "mine" : "theirs")">
+                    @if (!msg.IsMine)
+                    {
+                        <small class="text-muted d-block">@msg.SenderDisplayName</small>
+                    }
+                    @if (msg.MessageType == Models.ChatMessageType.Voice && !string.IsNullOrEmpty(msg.MediaPath))
+                    {
+                        <div class="d-flex align-items-center gap-2">
+                            <audio controls preload="metadata" src="/@msg.MediaPath" class="chat-audio"></audio>
+                            @if (msg.DurationSeconds is > 0)
+                            {
+                                <small class="text-nowrap">@FormatDuration(msg.DurationSeconds.Value)</small>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div>@msg.Content</div>
+                    }
+                    <small class="chat-time">@msg.SentAt.ToLocalTime().ToString("h:mm tt")</small>
+                </div>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(sendError))
+        {
+            <div class="alert alert-danger py-2">@sendError</div>
+        }
+
+        @if (isRecording)
+        {
+            <div class="alert alert-info d-flex align-items-center gap-2 py-2 mb-2">
+                <span class="recording-dot"></span>
+                <span>Recording voice message…</span>
+            </div>
+        }
+
+        <EditForm Model="input" OnSubmit="SendAsync" class="chat-input d-flex gap-2">
+            <InputText @bind-Value="input.Text" class="form-control" placeholder="Message..." maxlength="4000"
+                       disabled="@(!IsConnected || isRecording || isUploading)" />
+            <button type="submit" class="btn btn-primary"
+                    disabled="@(!IsConnected || isRecording || isUploading || string.IsNullOrWhiteSpace(input.Text))">
+                Send
+            </button>
+            @if (!isRecording)
+            {
+                <button type="button" class="btn btn-outline-secondary" title="Record voice"
+                        @onclick="StartRecording" disabled="@(!IsConnected || isUploading)">
+                    🎤
+                </button>
+            }
+            else
+            {
+                <button type="button" class="btn btn-success" title="Stop & send" @onclick="StopRecording">
+                    ⏹ Send
+                </button>
+                <button type="button" class="btn btn-outline-danger" title="Cancel" @onclick="CancelRecording">
+                    ✖
+                </button>
+            }
+        </EditForm>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string Username { get; set; } = "";
+
+    private HubConnection? hubConnection;
+    private string? currentUserId;
+    private int? conversationId;
+    private string? otherDisplayName;
+    private string? otherAvatar;
+    private string? otherUserId;
+    private string presenceLabel = "";
+    private string? loadError;
+    private string? sendError;
+    private string displayTitle = "Chat";
+
+    private bool isRecording;
+    private bool isUploading;
+
+    private readonly List<ChatMessageDto> messages = [];
+    private ChatInput input = new();
+
+    private bool IsConnected => hubConnection?.State == HubConnectionState.Connected;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await CleanupHubAsync();
+        messages.Clear();
+        loadError = null;
+        conversationId = null;
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (currentUserId is null)
+        {
+            loadError = "Please log in to use chat.";
+            return;
+        }
+
+        var otherUser = await FollowService.GetProfileByUserNameAsync(Username);
+        if (otherUser is null)
+        {
+            loadError = "User not found.";
+            return;
+        }
+
+        if (otherUser.Id == currentUserId)
+        {
+            loadError = "You cannot message yourself.";
+            return;
+        }
+
+        otherDisplayName = otherUser.DisplayName;
+        otherAvatar = otherUser.AvatarPath;
+        otherUserId = otherUser.Id;
+        displayTitle = otherUser.DisplayName;
+
+        var conversation = await ChatService.GetOrCreateConversationAsync(currentUserId, otherUser.Id);
+        conversationId = conversation.Id;
+
+        var history = await ChatService.GetMessagesAsync(conversation.Id, currentUserId);
+        messages.AddRange(history);
+
+        await ConnectHubAsync();
+
+        // Load presence after chat is visible — non-blocking
+        _ = LoadPresenceAsync(otherUser.Id);
+    }
+
+    private async Task LoadPresenceAsync(string userId)
+    {
+        try
+        {
+            presenceLabel = await PresenceService.GetPresenceLabelAsync(userId);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* never block chat for presence */ }
+    }
+
+    private async Task ConnectHubAsync()
+    {
+        if (conversationId is null) return;
+
+        hubConnection = HubFactory.Create();
+        hubConnection.On<ChatMessageDto>("ReceiveMessage", OnMessageReceived);
+        try
+        {
+            await hubConnection.StartAsync();
+            await hubConnection.InvokeAsync("JoinConversation", conversationId.Value);
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Could not connect to chat: {ex.Message}";
+        }
+    }
+
+    private void OnMessageReceived(ChatMessageDto message)
+    {
+        if (messages.Any(m => m.Id == message.Id))
+        {
+            return;
+        }
+
+        var normalized = message with { IsMine = message.SenderId == currentUserId };
+        messages.Add(normalized);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SendAsync()
+    {
+        sendError = null;
+        if (hubConnection is null || conversationId is null || string.IsNullOrWhiteSpace(input.Text))
+        {
+            return;
+        }
+
+        try
+        {
+            await hubConnection.InvokeAsync("SendMessage", conversationId.Value, input.Text);
+            input = new ChatInput();
+        }
+        catch (Exception ex)
+        {
+            sendError = ex.Message;
+        }
+    }
+
+    private async Task StartRecording()
+    {
+        sendError = null;
+        try
+        {
+            await JS.InvokeVoidAsync("MiniInstagramVoice.start");
+            isRecording = true;
+        }
+        catch (Exception ex)
+        {
+            sendError = $"Microphone error: {ex.Message}";
+        }
+    }
+
+    private async Task StopRecording()
+    {
+        if (!isRecording || conversationId is null) return;
+
+        isRecording = false;
+        isUploading = true;
+        sendError = null;
+        StateHasChanged();
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "MiniInstagramVoice.stopAndUpload",
+                conversationId.Value,
+                "");
+        }
+        catch (Exception ex)
+        {
+            sendError = $"Could not send voice: {ex.Message}";
+        }
+        finally
+        {
+            isUploading = false;
+        }
+    }
+
+    private async Task CancelRecording()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("MiniInstagramVoice.cancel");
+        }
+        catch
+        {
+            /* ignore */
+        }
+        isRecording = false;
+    }
+
+    private async Task CleanupHubAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+            hubConnection = null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("MiniInstagramVoice.cancel");
+        }
+        catch
+        {
+            /* ignore */
+        }
+        await CleanupHubAsync();
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+
+    private static string FormatDuration(int seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.TotalMinutes >= 1
+            ? $"{(int)ts.TotalMinutes}:{ts.Seconds:D2}"
+            : $"0:{ts.Seconds:D2}";
+    }
+
+    private sealed class ChatInput
+    {
+        public string Text { get; set; } = "";
+    }
+}

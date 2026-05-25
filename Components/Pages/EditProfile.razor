@@ -1,0 +1,157 @@
+@page "/profile/edit"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@inject UserManager<Data.ApplicationUser> UserManager
+@inject IProfileService ProfileService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<PageTitle>Edit profile · Instagram</PageTitle>
+
+<div class="ig-page edit-profile-page">
+    <h1 class="ig-page-title">Edit profile</h1>
+
+    @if (user is null)
+    {
+        <p>Loading...</p>
+    }
+    else
+    {
+        <EditForm Model="model" OnValidSubmit="SaveProfile" class="ig-create-card mb-4">
+            <div class="mb-3">
+                <label class="form-label">Display name</label>
+                <InputText @bind-Value="model.DisplayName" class="form-control" maxlength="100" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Bio</label>
+                <InputTextArea @bind-Value="model.Bio" class="form-control" rows="3" maxlength="500" />
+            </div>
+            <div class="form-check mb-3">
+                <InputCheckbox @bind-Value="model.IsPrivate" class="form-check-input" id="private-account" />
+                <label class="form-check-label" for="private-account">Private account</label>
+                <p class="ig-form-help mt-2">Only approved followers can see your posts.</p>
+            </div>
+            <button type="submit" class="ig-btn ig-btn-primary" disabled="@isSaving">Submit</button>
+        </EditForm>
+
+        <div class="ig-create-card">
+            <label class="form-label">Profile photo</label>
+            <div class="ig-edit-avatar-preview">
+                <img class="avatar-lg" src="@AvatarUrl(user.AvatarPath)" alt="" />
+            </div>
+            <InputFile OnChange="OnAvatarSelected" accept="image/*" class="form-control" />
+            @if (!string.IsNullOrEmpty(selectedAvatarName))
+            {
+                <p class="ig-form-help mt-2">Selected: @selectedAvatarName</p>
+            }
+            <button type="button" class="ig-btn ig-btn-secondary mt-3" @onclick="SaveAvatar" disabled="@isSaving || avatarFile is null">
+                Save profile photo
+            </button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(message))
+        {
+            <div class="alert alert-success mt-3">@message</div>
+        }
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger mt-3">@errorMessage</div>
+        }
+    }
+</div>
+
+@code {
+    private Data.ApplicationUser? user;
+    private ProfileModel model = new();
+    private IBrowserFile? avatarFile;
+    private string? selectedAvatarName;
+    private bool isSaving;
+    private string? message;
+    private string? errorMessage;
+
+    private const long AvatarMaxFileSize = 10 * 1024 * 1024;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId is null) return;
+
+        user = await UserManager.FindByIdAsync(userId);
+        if (user is null) return;
+
+        model.DisplayName = user.DisplayName;
+        model.Bio = user.Bio ?? "";
+        model.IsPrivate = user.IsPrivate;
+    }
+
+    private async Task SaveProfile()
+    {
+        if (user is null) return;
+        isSaving = true;
+        message = null;
+        errorMessage = null;
+        try
+        {
+            await ProfileService.UpdateProfileAsync(user.Id, model.DisplayName, model.Bio, model.IsPrivate);
+            user.IsPrivate = model.IsPrivate;
+            message = "Profile updated.";
+            Navigation.NavigateTo($"/profile/{user.UserName}");
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void OnAvatarSelected(InputFileChangeEventArgs e)
+    {
+        avatarFile = e.File;
+        selectedAvatarName = avatarFile.Name;
+        message = null;
+        errorMessage = null;
+    }
+
+    private async Task SaveAvatar()
+    {
+        if (user is null || avatarFile is null) return;
+        isSaving = true;
+        message = null;
+        errorMessage = null;
+        try
+        {
+            var resizedAvatar = await avatarFile.RequestImageFileAsync("image/jpeg", 512, 512);
+            await using var stream = resizedAvatar.OpenReadStream(AvatarMaxFileSize);
+
+            user.AvatarPath = await ProfileService.UpdateAvatarAsync(user.Id, stream, AvatarFileName(avatarFile.Name));
+            avatarFile = null;
+            selectedAvatarName = null;
+            message = "Avatar updated.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Could not upload avatar: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+
+    private static string AvatarFileName(string originalFileName)
+    {
+        var name = Path.GetFileNameWithoutExtension(originalFileName);
+        return string.IsNullOrWhiteSpace(name) ? "avatar.jpg" : $"{name}.jpg";
+    }
+
+    private sealed class ProfileModel
+    {
+        public string DisplayName { get; set; } = "";
+        public string Bio { get; set; } = "";
+        public bool IsPrivate { get; set; }
+    }
+}

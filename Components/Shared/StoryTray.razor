@@ -1,0 +1,59 @@
+@rendermode InteractiveServer
+@using System.Security.Claims
+@inject IStoryService StoryService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<section class="ig-story-tray" aria-label="Stories">
+    <a class="ig-story-pill add" href="@YourStoryHref">
+        <span class="ig-story-avatar @(currentUserStory is null ? "add-symbol" : currentUserStory.UnviewedCount > 0 ? "unseen" : "seen")">
+            @if (currentUserStory is null)
+            {
+                <span>+</span>
+            }
+            else
+            {
+                <img src="@AvatarUrl(currentUserStory.AvatarPath)" alt="" />
+            }
+        </span>
+        <span class="ig-story-name">Your story</span>
+    </a>
+
+    @if (stories is null)
+    {
+        <div class="ig-story-loading"></div>
+    }
+    else
+    {
+        @foreach (var story in visibleStories)
+        {
+            <a class="ig-story-pill" href="@($"/stories/view/{story.UserName}")">
+                <span class="ig-story-avatar @(story.UnviewedCount > 0 ? "unseen" : "seen")">
+                    <img src="@AvatarUrl(story.AvatarPath)" alt="" />
+                </span>
+                <span class="ig-story-name">@(story.IsCurrentUser ? "You" : story.UserName)</span>
+            </a>
+        }
+    }
+</section>
+
+@code {
+    private IReadOnlyList<StoryTrayItem>? stories;
+    private StoryTrayItem? currentUserStory;
+    private IEnumerable<StoryTrayItem> visibleStories =>
+        stories?.Where(story => !story.IsCurrentUser) ?? [];
+    private string YourStoryHref =>
+        currentUserStory is null ? "/stories/create" : $"/stories/view/{currentUserStory.UserName}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        stories = string.IsNullOrEmpty(currentUserId)
+            ? []
+            : await StoryService.GetStoryTrayAsync(currentUserId);
+        currentUserStory = stories.FirstOrDefault(story => story.IsCurrentUser);
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+}

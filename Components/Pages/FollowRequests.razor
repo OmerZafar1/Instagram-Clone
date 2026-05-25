@@ -1,0 +1,123 @@
+@page "/follow-requests"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@inject IFollowService FollowService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Follow requests - Instagram</PageTitle>
+
+<div class="ig-page follow-requests-page">
+    <h1 class="ig-page-title">Follow requests</h1>
+
+    @if (!string.IsNullOrEmpty(actionError))
+    {
+        <div class="ig-alert">@actionError</div>
+    }
+
+    @if (isLoading)
+    {
+        <p class="ig-empty-text text-center">Loading...</p>
+    }
+    else if (requests.Count == 0)
+    {
+        <div class="ig-empty-state ig-empty-state-compact">
+            <p class="ig-empty-title">No follow requests</p>
+            <p class="ig-empty-text">Requests to follow your private account will appear here.</p>
+        </div>
+    }
+    else
+    {
+        <div class="ig-request-list">
+            @foreach (var request in requests)
+            {
+                <div class="ig-request-row">
+                    <a class="ig-user-row ig-request-user" href="/profile/@request.UserName">
+                        <img class="avatar-sm" src="@AvatarUrl(request.AvatarPath)" alt="" />
+                        <div>
+                            <strong>@request.UserName</strong>
+                            <span>@request.DisplayName</span>
+                        </div>
+                    </a>
+                    <div class="ig-request-actions">
+                        <button type="button" class="ig-btn ig-btn-primary" @onclick="() => Accept(request.Id)" disabled="@isBusy">Accept</button>
+                        <button type="button" class="ig-btn ig-btn-secondary" @onclick="() => Reject(request.Id)" disabled="@isBusy">Delete</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private readonly List<Models.FollowRequestDto> requests = [];
+    private string? currentUserId;
+    private string? actionError;
+    private bool isLoading = true;
+    private bool isBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        await LoadRequests();
+    }
+
+    private async Task LoadRequests()
+    {
+        if (currentUserId is null)
+        {
+            isLoading = false;
+            return;
+        }
+
+        isLoading = true;
+        actionError = null;
+        requests.Clear();
+        requests.AddRange(await FollowService.GetPendingFollowRequestsAsync(currentUserId));
+        isLoading = false;
+    }
+
+    private async Task Accept(int requestId)
+    {
+        if (currentUserId is null || isBusy) return;
+        isBusy = true;
+        actionError = null;
+        try
+        {
+            await FollowService.AcceptFollowRequestAsync(requestId, currentUserId);
+            await LoadRequests();
+        }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task Reject(int requestId)
+    {
+        if (currentUserId is null || isBusy) return;
+        isBusy = true;
+        actionError = null;
+        try
+        {
+            await FollowService.RejectFollowRequestAsync(requestId, currentUserId);
+            await LoadRequests();
+        }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+}

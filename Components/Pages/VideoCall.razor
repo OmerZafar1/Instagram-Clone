@@ -1,0 +1,188 @@
+@page "/call/{Username}"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IFollowService FollowService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Navigation
+
+<PageTitle>@pageTitle</PageTitle>
+
+<div class="video-call-page mx-auto">
+    @if (!string.IsNullOrEmpty(loadError))
+    {
+        <div class="alert alert-danger">@loadError</div>
+        <a class="btn btn-secondary" href="/messages">Back to messages</a>
+    }
+    else
+    {
+        <div class="video-call-header d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h1 class="h5 mb-0">@displayName</h1>
+                <small class="text-muted" id="call-status-text">@statusText</small>
+            </div>
+            <button class="btn btn-danger" @onclick="EndCall">End call</button>
+        </div>
+
+        @if (VoiceOnly)
+        {
+            <div class="voice-call-stage card shadow-sm p-5 mb-3 text-center">
+                <div class="voice-call-avatar mb-3">📞</div>
+                <p class="mb-0 text-muted">Voice call in progress</p>
+            </div>
+            <video id="localVideo" autoplay playsinline muted class="d-none"></video>
+            <video id="remoteVideo" autoplay playsinline class="d-none"></video>
+        }
+        else
+        {
+            <div class="video-stage card shadow-sm overflow-hidden mb-3">
+                <video id="remoteVideo" autoplay playsinline class="remote-video"></video>
+                <video id="localVideo" autoplay playsinline muted class="local-video"></video>
+            </div>
+        }
+
+        <audio id="remoteAudio" autoplay playsinline class="d-none"></audio>
+        <audio id="localAudio" muted class="d-none"></audio>
+
+        <p class="text-muted small mb-0">
+            Allow microphone@(VoiceOnly ? "" : " and camera") when prompted.
+        </p>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public string Username { get; set; } = "";
+
+    [SupplyParameterFromQuery(Name = "callId")]
+    public string? CallId { get; set; }
+
+    [SupplyParameterFromQuery]
+    public bool Incoming { get; set; }
+
+    [SupplyParameterFromQuery]
+    public bool Voice { get; set; }
+
+    private bool VoiceOnly => Voice;
+
+    private DotNetObjectReference<VideoCall>? dotNetRef;
+    private string? targetUserId;
+    private string? loadError;
+    private string displayName = "";
+    private string pageTitle = "Call";
+    private string statusText = "Starting…";
+    private bool initialized;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loadError = null;
+        targetUserId = null;
+        statusText = "Starting…";
+        pageTitle = VoiceOnly ? "Voice call" : "Video call";
+
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (currentUserId is null)
+        {
+            loadError = "Please log in.";
+            return;
+        }
+
+        var otherUser = await FollowService.GetProfileByUserNameAsync(Username);
+        if (otherUser is null)
+        {
+            loadError = "User not found.";
+            return;
+        }
+
+        if (otherUser.Id == currentUserId)
+        {
+            loadError = "You cannot call yourself.";
+            return;
+        }
+
+        targetUserId = otherUser.Id;
+        displayName = otherUser.DisplayName;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || initialized || loadError is not null || targetUserId is null)
+        {
+            return;
+        }
+
+        initialized = true;
+        dotNetRef = DotNetObjectReference.Create(this);
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "MiniInstagramCallHub.initCallPage",
+                dotNetRef,
+                CallId ?? "",
+                !Incoming,
+                targetUserId,
+                VoiceOnly);
+        }
+        catch (Exception ex)
+        {
+            loadError = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public Task OnStatus(string text)
+    {
+        statusText = text;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnCallStarted(string callId)
+    {
+        statusText = "Ringing…";
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnCallAccepted(string callId)
+    {
+        statusText = "Connecting media…";
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnCallError(string message)
+    {
+        loadError = message;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnCallEnded(string callId, string reason)
+    {
+        statusText = reason == "declined" ? "Call declined" : "Call ended";
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task EndCall()
+    {
+        try { await JS.InvokeVoidAsync("MiniInstagramCallHub.endCall"); } catch { /* ignore */ }
+        Navigation.NavigateTo("/messages");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("MiniInstagramCallHub.endCall"); } catch { /* ignore */ }
+        dotNetRef?.Dispose();
+    }
+}

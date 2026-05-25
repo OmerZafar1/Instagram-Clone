@@ -1,0 +1,74 @@
+@page "/post/{PostId:int}"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@inject IPostService PostService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>@pageTitle</PageTitle>
+
+<CascadingValue Value="currentUserId">
+    <div class="ig-page post-details-page">
+        <a class="ig-back-link" href="@BackLink">Back to profile</a>
+
+        @if (!string.IsNullOrEmpty(loadError))
+        {
+            <div class="ig-alert">@loadError</div>
+        }
+        else if (isLoading)
+        {
+            <div class="ig-skeleton-post"></div>
+        }
+        else if (post is null)
+        {
+            <div class="ig-empty-state ig-empty-state-compact">
+                <p class="ig-empty-title">Post not found</p>
+            </div>
+        }
+        else
+        {
+            <PostCard Post="post" OnChanged="LoadPost" />
+        }
+    </div>
+</CascadingValue>
+
+@code {
+    [Parameter]
+    public int PostId { get; set; }
+
+    private Models.Post? post;
+    private string? currentUserId;
+    private string? loadError;
+    private string pageTitle = "Post";
+    private bool isLoading = true;
+
+    private string BackLink => string.IsNullOrEmpty(post?.User.UserName)
+        ? "/feed"
+        : $"/profile/{post.User.UserName}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        await LoadPost();
+    }
+
+    private async Task LoadPost()
+    {
+        isLoading = true;
+        loadError = null;
+
+        try
+        {
+            post = await PostService.GetPostForViewerAsync(PostId, currentUserId);
+            pageTitle = post is null ? "Post not found" : $"{post.User.UserName}'s post";
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Could not load this post: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

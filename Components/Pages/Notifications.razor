@@ -1,0 +1,110 @@
+@page "/notifications"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@inject INotificationService NotificationService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Notifications · Instagram</PageTitle>
+
+<div class="ig-page notifications-page">
+    <div class="ig-notif-header">
+        <h1 class="ig-page-title mb-0">Notifications</h1>
+        @if (notifications?.Count > 0 && unreadCount > 0)
+        {
+            <button type="button" class="ig-btn ig-btn-secondary" @onclick="MarkAllRead">Mark all as read</button>
+        }
+    </div>
+
+    @if (notifications is null)
+    {
+        <p class="ig-empty-text text-center">Loading…</p>
+    }
+    else if (notifications.Count == 0)
+    {
+        <div class="ig-empty-state">
+            <p class="ig-empty-title">No notifications yet</p>
+            <p class="ig-empty-text">When someone likes, comments, follows, or messages you, you'll see it here.</p>
+        </div>
+    }
+    else
+    {
+        <ul class="ig-notif-list">
+            @foreach (var n in notifications)
+            {
+                <li class="ig-notif-item @(n.IsRead ? "" : "unread")">
+                    <a class="ig-notif-link" href="@GetLink(n)" @onclick="() => MarkRead(n)">
+                        <img class="avatar-sm" src="@AvatarUrl(n.ActorAvatarPath)" alt="" />
+                        <div class="ig-notif-body">
+                            <p class="mb-0">
+                                <strong>@n.ActorUserName</strong> @n.Message
+                            </p>
+                            <small class="text-muted">@FormatTime(n.CreatedAt)</small>
+                        </div>
+                        @if (!n.IsRead)
+                        {
+                            <span class="ig-notif-dot" aria-label="Unread"></span>
+                        }
+                    </a>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<NotificationDto>? notifications;
+    private int unreadCount;
+    private string? userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        userId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId is null) return;
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (userId is null) return;
+        notifications = await NotificationService.GetForUserAsync(userId);
+        unreadCount = await NotificationService.GetUnreadCountAsync(userId);
+    }
+
+    private async Task MarkRead(NotificationDto n)
+    {
+        if (userId is null || n.IsRead) return;
+        await NotificationService.MarkAsReadAsync(n.Id, userId);
+        await LoadAsync();
+    }
+
+    private async Task MarkAllRead()
+    {
+        if (userId is null) return;
+        await NotificationService.MarkAllAsReadAsync(userId);
+        await LoadAsync();
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+
+    private static string GetLink(NotificationDto n) => n.Type switch
+    {
+        NotificationType.Follow => $"/profile/{n.ActorUserName}",
+        NotificationType.Message when n.ConversationId is not null => $"/messages/{n.ActorUserName}",
+        NotificationType.Like or NotificationType.Comment => $"/profile/{n.ActorUserName}",
+        _ => $"/profile/{n.ActorUserName}"
+    };
+
+    private static string FormatTime(DateTime utc)
+    {
+        var ago = DateTime.UtcNow - utc;
+        if (ago.TotalMinutes < 1) return "Just now";
+        if (ago.TotalHours < 1) return $"{(int)ago.TotalMinutes}m ago";
+        if (ago.TotalDays < 1) return $"{(int)ago.TotalHours}h ago";
+        if (ago.TotalDays < 7) return $"{(int)ago.TotalDays}d ago";
+        return utc.ToLocalTime().ToString("MMM d");
+    }
+}

@@ -1,0 +1,199 @@
+@page "/feed"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@inject IPostService PostService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Home - Instagram</PageTitle>
+
+<CascadingValue Value="currentUserId">
+    <div class="ig-page feed-page">
+        @if (!string.IsNullOrEmpty(loadError))
+        {
+            <div class="ig-alert">@loadError</div>
+        }
+
+        <StoryTray />
+
+        @if (isInitialLoading)
+        {
+            <div class="ig-skeleton-post"></div>
+        }
+        else if (posts.Count == 0)
+        {
+            <div class="ig-empty-state">
+                <p class="ig-empty-title">No posts yet</p>
+                <p class="ig-empty-text">Photos and videos from everyone will appear here once people start posting.</p>
+                <a class="ig-btn ig-btn-primary" href="/create">Create a post</a>
+            </div>
+        }
+        else
+        {
+            @foreach (var post in posts)
+            {
+                <PostCard Post="post" OnChanged="RefreshLoadedFeed" />
+            }
+        }
+
+        @if (isLoadingMore)
+        {
+            <div class="ig-feed-loading">Loading more...</div>
+        }
+        else if (!hasMore && posts.Count > 0)
+        {
+            <div class="ig-feed-end">You're all caught up.</div>
+        }
+
+        <div @ref="loadMoreSentinel" class="ig-feed-sentinel" aria-hidden="true"></div>
+    </div>
+</CascadingValue>
+
+@code {
+    private const int PageSize = 5;
+
+    private readonly SemaphoreSlim loadLock = new(1, 1);
+    private readonly List<Models.Post> posts = [];
+    private ElementReference loadMoreSentinel;
+    private DotNetObjectReference<Feed>? dotNetRef;
+
+    private DateTime? nextBeforeCreatedAt;
+    private int? nextBeforeId;
+    private string? loadError;
+    private string? currentUserId;
+    private bool hasMore = true;
+    private bool isInitialLoading = true;
+    private bool isLoadingMore;
+    private bool isDisposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(currentUserId))
+        {
+            if (auth.User.Identity?.IsAuthenticated == true)
+            {
+                loadError = "Could not load your account. Try refreshing the page.";
+            }
+
+            hasMore = false;
+            isInitialLoading = false;
+            return;
+        }
+
+        await LoadPageAsync(reset: true, take: PageSize);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        dotNetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("MiniInstagramInfiniteScroll.observe", loadMoreSentinel, dotNetRef);
+    }
+
+    [JSInvokable]
+    public async Task LoadMore()
+    {
+        if (isDisposed || isInitialLoading || isLoadingMore || !hasMore)
+        {
+            return;
+        }
+
+        await LoadPageAsync(reset: false, take: PageSize);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshLoadedFeed()
+    {
+        var take = Math.Max(posts.Count, PageSize);
+        await LoadPageAsync(reset: true, take: take);
+    }
+
+    private async Task LoadPageAsync(bool reset, int take)
+    {
+        if (isDisposed || string.IsNullOrEmpty(currentUserId))
+        {
+            return;
+        }
+
+        if (!reset && (!hasMore || isLoadingMore || isInitialLoading))
+        {
+            return;
+        }
+
+        await loadLock.WaitAsync();
+        try
+        {
+            if (!reset && (!hasMore || isLoadingMore || isInitialLoading))
+            {
+                return;
+            }
+
+            loadError = null;
+            if (reset)
+            {
+                isInitialLoading = posts.Count == 0;
+            }
+            else
+            {
+                isLoadingMore = true;
+            }
+
+            var page = await PostService.GetFeedPageAsync(
+                currentUserId,
+                reset ? null : nextBeforeCreatedAt,
+                reset ? null : nextBeforeId,
+                take);
+
+            if (reset)
+            {
+                posts.Clear();
+                posts.AddRange(page.Items);
+            }
+            else
+            {
+                var existingIds = posts.Select(p => p.Id).ToHashSet();
+                posts.AddRange(page.Items.Where(p => !existingIds.Contains(p.Id)));
+            }
+
+            nextBeforeCreatedAt = page.NextBeforeCreatedAt;
+            nextBeforeId = page.NextBeforeId;
+            hasMore = page.HasMore;
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Could not load your feed: {ex.Message}";
+        }
+        finally
+        {
+            isInitialLoading = false;
+            isLoadingMore = false;
+            loadLock.Release();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        isDisposed = true;
+
+        try
+        {
+            await JS.InvokeVoidAsync("MiniInstagramInfiniteScroll.unobserve", loadMoreSentinel);
+        }
+        catch
+        {
+            /* ignore JS disconnects during navigation */
+        }
+
+        dotNetRef?.Dispose();
+        loadLock.Dispose();
+    }
+}

@@ -1,0 +1,61 @@
+@page "/trending"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject ITrendingService TrendingService
+
+<PageTitle>Trending · Instagram</PageTitle>
+
+<div class="ig-page trending-page">
+    <h1 class="ig-page-title">Trending</h1>
+    <p class="ig-trending-subtitle">Popular posts in the last 24 hours</p>
+
+    @if (posts is null)
+    {
+        <p class="ig-empty-text text-center">Loading…</p>
+    }
+    else if (posts.Count == 0)
+    {
+        <div class="ig-empty-state">
+            <p class="ig-empty-title">Nothing trending yet</p>
+            <p class="ig-empty-text">Like and comment on posts — activity in the last 24 hours shows up here.</p>
+            <a class="ig-btn ig-btn-primary" href="/feed">Go to feed</a>
+        </div>
+    }
+    else
+    {
+        <div class="ig-trending-grid">
+            @foreach (var (post, index) in posts.Select((p, i) => (p, i)))
+            {
+                <a class="ig-trending-card" href="/profile/@post.UserName">
+                    <span class="ig-trending-rank">#@(index + 1)</span>
+                    @if (post.MediaType == "video")
+                    {
+                        <video src="/@post.ImagePath" muted preload="metadata" playsinline></video>
+                        <span class="ig-media-badge">Video</span>
+                    }
+                    else
+                    {
+                        <img src="/@post.ImagePath" alt="" loading="lazy" />
+                    }
+                    <div class="ig-trending-card-meta">
+                        <img class="avatar-sm" src="@AvatarUrl(post.AvatarPath)" alt="" />
+                        <span>@post.UserName</span>
+                        <span class="ig-trending-score">♥ @post.LikeCount · @post.Score pts</span>
+                    </div>
+                </a>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<TrendingPostDto>? posts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        posts = await TrendingService.GetTrendingPostsAsync(hours: 24, take: 24);
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+}

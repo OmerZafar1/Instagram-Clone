@@ -1,0 +1,90 @@
+@page "/explore"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@inject IFollowService FollowService
+@inject ITrendingService TrendingService
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Explore · Instagram</PageTitle>
+
+<div class="ig-page explore-page">
+    <h1 class="ig-page-title">Explore</h1>
+
+    <section class="ig-trending-section">
+        <div class="ig-trending-section-header">
+            <h2 class="ig-trending-heading">Trending now</h2>
+            <a class="ig-trending-see-all" href="/trending">See all</a>
+        </div>
+
+        @if (trendingPosts is null)
+        {
+            <p class="ig-empty-text small">Loading trending…</p>
+        }
+        else if (trendingPosts.Count == 0)
+        {
+            <p class="ig-empty-text small mb-3">No trending posts yet. Like and comment to boost posts here.</p>
+        }
+        else
+        {
+            <div class="ig-trending-scroll">
+                @foreach (var post in trendingPosts)
+                {
+                    <a class="ig-trending-thumb" href="/profile/@post.UserName" title="@post.UserName">
+                        @if (post.MediaType == "video")
+                        {
+                            <video src="/@post.ImagePath" muted preload="metadata" playsinline></video>
+                            <span class="ig-media-badge">Video</span>
+                        }
+                        else
+                        {
+                            <img src="/@post.ImagePath" alt="" loading="lazy" />
+                        }
+                        <span class="ig-trending-thumb-overlay">
+                            <span class="ig-trending-thumb-user">@post.UserName</span>
+                            <span>♥ @post.LikeCount</span>
+                        </span>
+                    </a>
+                }
+            </div>
+        }
+    </section>
+
+    <h2 class="ig-section-heading">Search people</h2>
+    <input class="ig-search-box" placeholder="Search"
+           @bind="searchQuery" @bind:event="oninput" @onkeyup="Search" />
+
+    @foreach (var user in results)
+    {
+        <a class="ig-user-row" href="/profile/@user.UserName">
+            <img class="avatar-sm" src="@AvatarUrl(user.AvatarPath)" alt="" />
+            <div>
+                <strong>@user.UserName</strong>
+                <span>@user.DisplayName</span>
+            </div>
+        </a>
+    }
+</div>
+
+@code {
+    private string searchQuery = "";
+    private IReadOnlyList<Data.ApplicationUser> results = [];
+    private IReadOnlyList<TrendingPostDto>? trendingPosts;
+    private string? currentUserId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        trendingPosts = await TrendingService.GetTrendingPostsAsync(hours: 24, take: 8);
+    }
+
+    private async Task Search()
+    {
+        results = await FollowService.SearchUsersAsync(searchQuery, currentUserId);
+    }
+
+    private static string AvatarUrl(string? path) =>
+        string.IsNullOrEmpty(path) ? "/images/default-avatar.svg" : $"/{path}";
+}
