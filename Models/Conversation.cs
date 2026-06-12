@@ -10,5 +10,4 @@ public class Conversation
 
     public Data.ApplicationUser User1 { get; set; } = null!;
     public Data.ApplicationUser User2 { get; set; } = null!;
-    public ICollection<ChatMessage> Messages { get; set; } = [];
 }

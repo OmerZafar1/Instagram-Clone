@@ -4,7 +4,7 @@ using MiniInstagram.Services;
 namespace MiniInstagram.Jobs;
 
 /// <summary>
-/// Hangfire background jobs: persist notification to SQL, then push via SignalR.
+/// Hangfire background jobs: persist notification to MongoDB, then push via SignalR.
 /// </summary>
 public class NotificationJob(
     INotificationService notifications,

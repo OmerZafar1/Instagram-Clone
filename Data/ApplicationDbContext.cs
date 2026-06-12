@@ -15,8 +15,6 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<UserFollow> UserFollows => Set<UserFollow>();
     public DbSet<FollowRequest> FollowRequests => Set<FollowRequest>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
-    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
-    public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<Story> Stories => Set<Story>();
     public DbSet<StoryView> StoryViews => Set<StoryView>();
 
@@ -176,40 +174,6 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
             entity.HasIndex(c => new { c.User1Id, c.User2Id }).IsUnique();
             entity.HasIndex(c => c.UpdatedAt);
-        });
-
-        builder.Entity<ChatMessage>(entity =>
-        {
-            entity.HasOne(m => m.Conversation)
-                .WithMany(c => c.Messages)
-                .HasForeignKey(m => m.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(m => m.Sender)
-                .WithMany()
-                .HasForeignKey(m => m.SenderId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            entity.Property(m => m.Content).HasMaxLength(4000);
-            entity.Property(m => m.MediaPath).HasMaxLength(500);
-            entity.HasIndex(m => m.SentAt);
-        });
-
-        builder.Entity<Notification>(entity =>
-        {
-            entity.HasOne(n => n.Recipient)
-                .WithMany()
-                .HasForeignKey(n => n.RecipientId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(n => n.Actor)
-                .WithMany()
-                .HasForeignKey(n => n.ActorId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            entity.Property(n => n.Message).HasMaxLength(500);
-            entity.HasIndex(n => new { n.RecipientId, n.IsRead });
-            entity.HasIndex(n => n.CreatedAt);
         });
 
         builder.Entity<ApplicationUser>(entity =>

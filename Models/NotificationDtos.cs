@@ -1,7 +1,7 @@
 namespace MiniInstagram.Models;
 
 public record NotificationDto(
-    int Id,
+    string Id,
     string ActorId,
     string ActorUserName,
     string ActorDisplayName,

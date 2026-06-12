@@ -2,14 +2,26 @@
 
 MiniInstagram is an ASP.NET Core Blazor Server social app inspired by Instagram. It includes posts, stories, profiles, follows, saved posts, comments, chat, voice messages, notifications, calls, trending content, rate limiting, and spam detection.
 
+The app uses a **polyglot persistence** architecture: **SQL Server** for structured relational data, **MongoDB** for high-volume chat and notifications, and **Redis** for ephemeral realtime features.
+
 ## Tech Stack
 
 - ASP.NET Core / Blazor Server on .NET 9
-- Entity Framework Core with SQL Server
+- **SQL Server** + Entity Framework Core (users, posts, likes, comments, follows, stories, conversations)
+- **MongoDB** (chat messages, notifications)
 - ASP.NET Core Identity
 - SignalR for realtime chat, calls, presence, and notifications
-- Hangfire for background jobs
-- Redis for presence, rate limiting, and trending data
+- Hangfire for background jobs (SQL Server storage)
+- Redis for presence, rate limiting, and trending cache
+
+## Data Architecture
+
+| Store | Used for |
+|-------|----------|
+| **SQL Server** | Login, users, posts, likes, comments, saves, follows, stories, conversation metadata |
+| **MongoDB** | Chat messages (`chat_messages`), notifications (`notifications`) |
+| **Redis** | Online / last-seen, trending cache, rate limiting |
+| **Local disk** | Uploaded images, videos, avatars, voice notes (`wwwroot/uploads/`) |
 
 ## Features
 
@@ -19,8 +31,8 @@ MiniInstagram is an ASP.NET Core Blazor Server social app inspired by Instagram.
 - Image/video posts with comments, likes, saves, and visibility controls
 - Stories with automatic cleanup
 - Follow requests for private accounts
-- Realtime notifications
-- Realtime chat with voice messages
+- Realtime notifications (MongoDB)
+- Realtime chat with voice messages (MongoDB)
 - Video/audio call session support
 - Redis-backed rate limiting and spam detection
 
@@ -28,8 +40,9 @@ MiniInstagram is an ASP.NET Core Blazor Server social app inspired by Instagram.
 
 - .NET 9 SDK
 - SQL Server
+- MongoDB (local or Atlas)
 - Redis
-- Optional: Docker, if you want the quickest Redis setup
+- Optional: Docker for Redis and/or MongoDB
 
 ## Setup
 
@@ -60,7 +73,39 @@ MiniInstagram is an ASP.NET Core Blazor Server social app inspired by Instagram.
    dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=.;Database=MiniInstagram;User Id=YOUR_USER;Password=YOUR_PASSWORD;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
    ```
 
-4. Start Redis.
+4. Configure MongoDB.
+
+   Chat messages and notifications are stored in MongoDB. Default settings in `appsettings.json`:
+
+   ```json
+   "MongoDb": {
+     "ConnectionString": "mongodb://localhost:27017",
+     "DatabaseName": "MiniInstagram"
+   }
+   ```
+
+   Override with user secrets if needed:
+
+   ```powershell
+   dotnet user-secrets set "MongoDb:ConnectionString" "mongodb://localhost:27017"
+   dotnet user-secrets set "MongoDb:DatabaseName" "MiniInstagram"
+   ```
+
+   Quick Docker option:
+
+   ```powershell
+   docker run --name miniinstagram-mongo -p 27017:27017 -d mongo:latest
+   ```
+
+   If the container already exists:
+
+   ```powershell
+   docker start miniinstagram-mongo
+   ```
+
+   MongoDB indexes are created automatically on app startup.
+
+5. Start Redis.
 
    Redis is used for presence, rate limiting, and trending data. The default connection is `localhost:6379`.
 
@@ -82,7 +127,7 @@ MiniInstagram is an ASP.NET Core Blazor Server social app inspired by Instagram.
    dotnet user-secrets set "ConnectionStrings:Redis" "localhost:6379,abortConnect=false"
    ```
 
-5. Install the EF Core CLI tool if you do not already have it:
+6. Install the EF Core CLI tool if you do not already have it:
 
    ```powershell
    dotnet tool install --global dotnet-ef
@@ -94,23 +139,25 @@ MiniInstagram is an ASP.NET Core Blazor Server social app inspired by Instagram.
    dotnet tool update --global dotnet-ef
    ```
 
-6. Apply database migrations:
+7. Apply database migrations (SQL Server):
 
    ```powershell
    dotnet ef database update
    ```
 
-7. Run the app:
+   Migrations also run automatically when the app starts.
+
+8. Run the app:
 
    ```powershell
    dotnet run
    ```
 
-8. Open the local URL shown in the terminal. It is usually one of these:
+9. Open the local URL shown in the terminal. Default ports from `launchSettings.json`:
 
    ```text
-   https://localhost:5001
-   http://localhost:5000
+   https://localhost:7059
+   http://localhost:5126
    ```
 
 ## Background Jobs
@@ -124,7 +171,19 @@ The project uses Hangfire for background jobs and SQL Server for Hangfire storag
 For example:
 
 ```text
-https://localhost:5001/hangfire
+https://localhost:7059/hangfire
+```
+
+## MongoDB Notes
+
+- Collections: `chat_messages`, `notifications`
+- Conversation metadata (participants) stays in SQL Server; message bodies live in MongoDB
+- Use MongoDB Compass to inspect data after sending a message or receiving a notification
+- For production, set `MongoDb__ConnectionString` as an environment variable instead of committing credentials
+
+```powershell
+$env:MongoDb__ConnectionString="mongodb://user:password@host:27017"
+$env:MongoDb__DatabaseName="MiniInstagram"
 ```
 
 ## Redis Notes
@@ -146,6 +205,7 @@ $env:ConnectionStrings__Redis="your-redis-host:6379,password=YOUR_PASSWORD,abort
 ## Troubleshooting
 
 - If `dotnet run` fails because SQL Server cannot connect, check that SQL Server is running and that your `DefaultConnection` user secret is correct.
+- If chat or notifications fail, confirm MongoDB is running on port `27017` (or your configured connection string).
 - If Redis errors appear, start Redis and confirm it is listening on port `6379`.
 - If `dotnet ef database update` is not recognized, install `dotnet-ef` with the command above.
 - If a build fails because `MiniInstagram.exe` or `MiniInstagram.dll` is locked, stop the running app and build again.
@@ -156,3 +216,7 @@ $env:ConnectionStrings__Redis="your-redis-host:6379,password=YOUR_PASSWORD,abort
 Do not commit local build output, database files, or uploaded media. The `.gitignore` file excludes `bin/`, `obj/`, `Data/*.db`, and `wwwroot/uploads/`.
 
 Keep real passwords and connection strings out of GitHub. Use user secrets locally and environment variables in production.
+
+## About
+
+ASP.NET Core Blazor Instagram clone with SQL Server, MongoDB, Redis, SignalR, and Hangfire.

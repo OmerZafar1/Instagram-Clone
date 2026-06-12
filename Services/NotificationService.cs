@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using MiniInstagram.Data;
+using MiniInstagram.Data.Mongo.Documents;
 using MiniInstagram.Models;
+using MiniInstagram.Services.Mongo;
 
 namespace MiniInstagram.Services;
 
-public class NotificationService(IDbContextFactory<ApplicationDbContext> dbFactory) : INotificationService
+public class NotificationService(
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    INotificationStore notifications) : INotificationService
 {
     public async Task<NotificationDto> CreateAsync(
         string recipientId,
@@ -20,7 +24,7 @@ public class NotificationService(IDbContextFactory<ApplicationDbContext> dbFacto
         var actor = await db.Users.AsNoTracking()
             .FirstAsync(u => u.Id == actorId, ct);
 
-        var notification = new Notification
+        var notification = new NotificationDocument
         {
             RecipientId = recipientId,
             ActorId = actorId,
@@ -32,9 +36,7 @@ public class NotificationService(IDbContextFactory<ApplicationDbContext> dbFacto
             CreatedAt = DateTime.UtcNow
         };
 
-        db.Notifications.Add(notification);
-        await db.SaveChangesAsync(ct);
-
+        await notifications.InsertAsync(notification, ct);
         return ToDto(notification, actor);
     }
 
@@ -43,53 +45,39 @@ public class NotificationService(IDbContextFactory<ApplicationDbContext> dbFacto
         int take = 50,
         CancellationToken ct = default)
     {
+        var items = await notifications.GetForUserAsync(userId, take, ct);
+        if (items.Count == 0)
+        {
+            return [];
+        }
+
         await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var actorIds = items.Select(n => n.ActorId).Distinct().ToList();
+        var actors = await db.Users.AsNoTracking()
+            .Where(u => actorIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, ct);
 
-        var items = await db.Notifications
-            .AsNoTracking()
-            .Where(n => n.RecipientId == userId)
-            .Include(n => n.Actor)
-            .OrderByDescending(n => n.CreatedAt)
-            .Take(take)
-            .ToListAsync(ct);
-
-        return items.Select(n => ToDto(n, n.Actor)).ToList();
+        return items
+            .Select(n => ToDto(n, actors.GetValueOrDefault(n.ActorId)))
+            .ToList();
     }
 
-    public async Task<int> GetUnreadCountAsync(string userId, CancellationToken ct = default)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        return await db.Notifications
-            .AsNoTracking()
-            .CountAsync(n => n.RecipientId == userId && !n.IsRead, ct);
-    }
+    public Task<int> GetUnreadCountAsync(string userId, CancellationToken ct = default) =>
+        notifications.GetUnreadCountAsync(userId, ct);
 
-    public async Task MarkAsReadAsync(int notificationId, string userId, CancellationToken ct = default)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var notification = await db.Notifications
-            .FirstOrDefaultAsync(n => n.Id == notificationId && n.RecipientId == userId, ct);
-        if (notification is null) return;
+    public Task MarkAsReadAsync(string notificationId, string userId, CancellationToken ct = default) =>
+        notifications.MarkAsReadAsync(notificationId, userId, ct);
 
-        notification.IsRead = true;
-        await db.SaveChangesAsync(ct);
-    }
+    public Task MarkAllAsReadAsync(string userId, CancellationToken ct = default) =>
+        notifications.MarkAllAsReadAsync(userId, ct);
 
-    public async Task MarkAllAsReadAsync(string userId, CancellationToken ct = default)
-    {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        await db.Notifications
-            .Where(n => n.RecipientId == userId && !n.IsRead)
-            .ExecuteUpdateAsync(s => s.SetProperty(n => n.IsRead, true), ct);
-    }
-
-    private static NotificationDto ToDto(Notification n, Data.ApplicationUser actor) =>
+    private static NotificationDto ToDto(NotificationDocument n, ApplicationUser? actor) =>
         new(
-            n.Id,
+            n.Id ?? "",
             n.ActorId,
-            actor.UserName ?? "",
-            actor.DisplayName,
-            actor.AvatarPath,
+            actor?.UserName ?? "",
+            actor?.DisplayName ?? "Unknown",
+            actor?.AvatarPath,
             n.Type,
             n.Message,
             n.PostId,

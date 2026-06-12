@@ -4,6 +4,9 @@ using Microsoft.EntityFrameworkCore;
 using MiniInstagram.Components;
 using MiniInstagram.Components.Account;
 using MiniInstagram.Data;
+using MiniInstagram.Data.Mongo;
+using MiniInstagram.Services.Mongo;
+using MongoDB.Driver;
 using MiniInstagram.Hubs;
 using MiniInstagram.Jobs;
 using MiniInstagram.Middleware;
@@ -45,6 +48,14 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(
 builder.Services.AddSingleton<IPresenceService, PresenceService>();
 builder.Services.AddSingleton<IRateLimitService, RateLimitService>();
 builder.Services.AddSingleton<ITrendingService, TrendingService>();
+
+var mongoSettings = builder.Configuration.GetSection("MongoDb").Get<MongoDbSettings>()
+    ?? new MongoDbSettings();
+builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoSettings.ConnectionString));
+builder.Services.AddSingleton(sp =>
+    sp.GetRequiredService<IMongoClient>().GetDatabase(mongoSettings.DatabaseName));
+builder.Services.AddSingleton<IChatMessageStore, ChatMessageStore>();
+builder.Services.AddSingleton<INotificationStore, NotificationStore>();
 
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityUserAccessor>();
@@ -93,6 +104,9 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     await db.Database.MigrateAsync();
+
+    var mongoDb = scope.ServiceProvider.GetRequiredService<IMongoDatabase>();
+    await MongoIndexInitializer.EnsureIndexesAsync(mongoDb);
 }
 
 // Configure the HTTP request pipeline.

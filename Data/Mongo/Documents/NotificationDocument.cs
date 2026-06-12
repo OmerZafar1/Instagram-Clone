@@ -1,10 +1,15 @@
-using MiniInstagram.Data;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
+using MiniInstagram.Models;
 
-namespace MiniInstagram.Models;
+namespace MiniInstagram.Data.Mongo.Documents;
 
-public class Notification
+public class NotificationDocument
 {
-    public int Id { get; set; }
+    [BsonId]
+    [BsonRepresentation(BsonType.ObjectId)]
+    public string? Id { get; set; }
+
     public string RecipientId { get; set; } = "";
     public string ActorId { get; set; } = "";
     public NotificationType Type { get; set; }
@@ -13,7 +18,4 @@ public class Notification
     public int? ConversationId { get; set; }
     public bool IsRead { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    public ApplicationUser Recipient { get; set; } = default!;
-    public ApplicationUser Actor { get; set; } = default!;
 }

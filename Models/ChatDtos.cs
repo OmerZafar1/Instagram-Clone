@@ -1,7 +1,7 @@
 namespace MiniInstagram.Models;
 
 public record ChatMessageDto(
-    int Id,
+    string Id,
     int ConversationId,
     string SenderId,
     string SenderDisplayName,
